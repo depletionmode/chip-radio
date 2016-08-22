@@ -55,7 +55,6 @@ def sigterm_mplayer():
     for p in pids:
         os.kill(p, 15)
 
-player = radiopy.Player()
 current_chan = None
 
 while True:
