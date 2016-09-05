@@ -2,82 +2,110 @@
 # @depletionmode, 2016
 # 
 # Dependancies:
-#  * radiopy (https://sourceforge.net/p/radiopy/code/ci/master/tree/radiopy/)
-#  * Adafruit_MCP3008 (https://github.com/adafruit/Adafruit_Python_MCP3008)
-#  * https://github.com/atenart/dtc
 #  * https://github.com/xtacocorex/CHIP_IO
 #  * https://github.com/xtacocorex/Adafruit_Python_GPIO
+#  * Adafruit_MCP3008 (https://github.com/adafruit/Adafruit_Python_MCP3008)
 
 import os
 import time
 import subprocess
 
-import radiopy.stations_tunein as stations_tunein
-
 import Adafruit_GPIO.SPI as SPI
 import Adafruit_MCP3008 as ADC
 
-adc = ADC.MCP3008(spi=SPI.SpiDev(0, 0))
+adc = ADC.MCP3008(spi=SPI.SpiDev(32766, 0))
 
-def _get(ch): return adc.read(ch) / 1024
+def _is_on():
+    v = 0
+    for i in range(1000):
+        v += adc.read_adc(3)
+    v /= 1000
+    if v > 500:
+        return True
+    return False
 
 stations = [
-    ((88.4,89.7),'BBC Radio 2'),
-    ((90.6,91.9),'BBC Radio 3'),
-    ((92.8,94.1),'BBC Radio 4'),
-    ((94.9,94.9),'BBC London'),
-    ((95.8,95.8),'Capital FM'),
-    ((97.3,97.3),'LBC'),
-    ((98.0,99.3),'BBC Radio 1'),
-    ((100.0,100.0),'Kiss'),
-    ((100.6,100.9),'Classic FM'),
-    ((105.4,105,4),'Magic'),
-    ((106.2,106.2),'Heart'),
-    ((107.1,107.1),'Capital XTRA')
+    ((88.4,90.0),'BBC Radio 2','http://www.radiofeeds.co.uk/bbcradio2.pls'),
+    ((90.0,92.0),'BBC Radio 3','http://www.radiofeeds.co.uk/bbcradio3.pls'),
+    ((92.0,94.0),'BBC Radio 4','http://www.radiofeeds.co.uk/bbcradio4.pls'),
+    ((94.0,96.0),'BBC London','http://www.radiofeeds.co.uk/bbclondon.pls'),
+    ((96.0,97.5),'Capital London','http://media-ice.musicradio.com/CapitalMP3.m3u'),
+    ((98.0,99.5),'BBC Radio 1','http://www.radiofeeds.co.uk/bbcradio1.pls'),
+    ((100.0,102.0),'Kiss','http://tx.whatson.com/icecast.php?i=kiss100.mp3.m3u'),
+    ((104.0,106),'Magic','http://media-ice.musicradio.com/HeartLondonMP3.m3u'),
+    ((106.0,107.5),'Heart','http://media-ice.musicradio.com/HeartLondonMP3.m3u'),
     ]
             
 def get_freq():
-	# FM is 88-108 MHz
-	return round(88.0 + (20.0 / _get(1)), 1)
+    # FM is 88-108 MHz
+    freq_step_list = [0,12,38,45,65,80,105,130,160,185,205,245,275,310,360,400,455,520,590,690,770]
+    # sample multiple times
+    v = 0
+    for i in range(5000):
+        v += adc.read_adc(0)
+    v /= 5000
+    print v
+    # find bucket
+    TILT=0
+    for i in range(len(freq_step_list)-1):
+        if freq_step_list[i]+TILT <= v <= freq_step_list[i+1]+TILT:
+            return 88.0 + i
+    return 108.0
 
 def lookup_chan(freq):
-    PAD = 0.5
-    for f,n in stations:
-        if f-PAD <= freq <= f+PAD:
-	    return n
-    return None
+    PAD = 0
+    for f,n,s in stations:
+        if f[0]-PAD <= freq < f[1]+PAD:
+	    return n,s
+    return None,None
 
 def speak(text):
-    subprocess.Popen('espeak -ven+f2 -k5 -s150 "{}"'.format(text).split())
+    subprocess.Popen('mplayer {}.wav'.format(text.replace(' ','_')).split())
+    #subprocess.call('flite -t "Station {}" -voice slt'.format(text).split())
+    #subprocess.call('espeak -ven+f3 -k5 -s150 "Station {}"'.format(text).split())
 
 def sigterm_mplayer():
-    pids = map(int,subprocess.check_output(['pidof','mplayer']).split())
-    for p in pids:
-        os.kill(p, 15)
+    try:
+        pids = map(int,subprocess.check_output(['pidof','mplayer']).split())
+        for p in pids:
+            os.kill(p, 15)
+    except:
+        pass
 
-current_chan = None
+current_chan = "Niks nie"
+current_vol = 0
 
 while True:
-    time.sleep(0.2)
+    time.sleep(0.7)
+    
+    if not _is_on():
+        sigterm_mplayer()
+        current_chan = "Niks nie"
+        current_vol = 0
+        continue
 
     # set volume
-    subprocess.call('amixer -D pulse sset Master {}%'.format(_get(0)).split()) 
+    vol = int(100*adc.read_adc(1)/1024.0)
+    if vol >= current_vol + 3 or vol <= current_vol - 3:
+        current_vol = vol
+        print "vol:", vol
+        subprocess.call(['amixer','sset','\'Power Amplifier\'','{}%'.format(vol)])
 
     # select station
-    chan = lookup_chan(get_freq())
-    if chan != current_chan:
-        sigterm_mplayer()
-	current_chan = chan
-	if not chan:
-	    subprocess.Popen('mplayer -softvol -vo null whitenoise.mp3'.split())
+    freq = get_freq()
+    chan = lookup_chan(freq)
+    print "freq:", freq
+    if chan[0] != current_chan:
+        current_chan_time = 0
+	if not chan[0] and current_chan != None:
+            pass
+            #sigterm_mplayer()
+	    #subprocess.Popen('mplayer -quiet -vo null whitenoise.mp3'.split())
 	else:
-	    speak(chan)
-	    station = stations_tunein.StationsTunein().get_station(chan)
-	    station_cmd = ''
-	    if station.has_key('stream_id'):
-	        station_cmd += '-aid ' + station['stream_id']
-	    if station.get('playlist', False) == 'yes':
-	    	station_cmd += '-playlist'
-	    station_cmd += station['stream']
-	    subprocess.Popen('mplayer -softvol -vo null -cache 32 {}'.format(station_cmd).split())
+            sigterm_mplayer()
+            print 'Turning to', chan[0]
+	    speak(chan[0])
+            time.sleep(1)
+	    subprocess.Popen('mplayer -quiet -vo null -cache 32 -playlist {}'.format(chan[1]).split())
+	current_chan = chan[0]
 
