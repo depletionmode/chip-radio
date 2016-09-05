@@ -15,12 +15,15 @@ import Adafruit_MCP3008 as ADC
 
 adc = ADC.MCP3008(spi=SPI.SpiDev(32766, 0))
 
-def _is_on():
+def _adc_ave_read(n, samples=1000):
     v = 0
-    for i in range(1000):
-        v += adc.read_adc(3)
-    v /= 1000
-    if v > 500:
+    for i in range(samples):
+        v += adc.read_adc(n)
+    v /= samples
+    return v
+
+def _is_on():
+    if _adc_ave_read(3) > 500:
         return True
     return False
 
@@ -40,11 +43,7 @@ def get_freq():
     # FM is 88-108 MHz
     freq_step_list = [0,12,38,45,65,80,105,130,160,185,205,245,275,310,360,400,455,520,590,690,770]
     # sample multiple times
-    v = 0
-    for i in range(5000):
-        v += adc.read_adc(0)
-    v /= 5000
-    print v
+    v = _adc_ave_read(0, 5000)
     # find bucket
     TILT=0
     for i in range(len(freq_step_list)-1):
@@ -85,7 +84,7 @@ while True:
         continue
 
     # set volume
-    vol = int(100*adc.read_adc(1)/1024.0)
+    vol = int(100*_adc_ave_read(1,100)/1024.0)
     if vol >= current_vol + 3 or vol <= current_vol - 3:
         current_vol = vol
         print "vol:", vol
