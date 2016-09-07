@@ -71,6 +71,9 @@ def sigterm_mplayer():
     except:
         pass
 
+def set_volume(vol):
+    subprocess.call(['amixer','sset','\'Power Amplifier\'','{}%'.format(vol)])
+
 current_chan = "Niks nie"
 current_vol = 0
 
@@ -88,7 +91,7 @@ while True:
     if vol >= current_vol + 3 or vol <= current_vol - 3:
         current_vol = vol
         print "vol:", vol
-        subprocess.call(['amixer','sset','\'Power Amplifier\'','{}%'.format(vol)])
+        set_volume(vol)
 
     # select station
     freq = get_freq()
